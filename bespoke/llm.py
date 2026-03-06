@@ -94,7 +94,7 @@ class LlmClient(abc.ABC):
 
 
 class GeminiLlmClient(LlmClient):
-    TEXT_MODEL = "gemini-2.5-flash-lite"
+    TEXT_MODEL = "gemini-3.1-flash-lite-preview"
     SPEAK_MODEL = "gemini-2.5-flash-preview-tts"
     VOICES = [
         "Aoede",
@@ -162,14 +162,14 @@ class GeminiLlmClient(LlmClient):
     ) -> list[str]:
         difficulty_explanation = DIFFICULTY_EXPLANATIONS[difficulty]
         if language.name in ["Chinese", "Japanese"]:
-            spaces = "spaces or "
+            spaces = "or with spaces "
         else:
             spaces = ""
         prompt = (
             f"Create example sentences in the language {language.writing_system}. "
             f"The output should be exactly {len(units)} lines. "
             "Each line will be interpreted as a sentence. "
-            f"Don't add numbering. Don't mark words with {spaces}** etc. "
+            f"Don't add numbering. Don't mark words as bold {spaces}etc. "
             "Only respond with the sentences, no introduction or explanations. "
             "The sentences should represent how native speakers naturally talk. \n"
             f"All sentences together should use the following words: \n{units} \n"
@@ -186,7 +186,6 @@ class GeminiLlmClient(LlmClient):
             contents=[prompt],
             config=self._genai.types.GenerateContentConfig(
                 response_modalities=["TEXT"],
-                temperature=2.0,
             ),
         )
         sentences = [s.strip() for s in response.text.strip().split("\n")]
@@ -232,7 +231,6 @@ class GeminiLlmClient(LlmClient):
             config=self._genai.types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=UnitTagsSchema,
-                temperature=2.0,
             ),
         )
         return [
@@ -377,7 +375,6 @@ class OpenRouterElevenLabsLlmClient(LlmClient):
         response = await self._litellm.acompletion(
             model=self.TEXT_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=1.0,
             api_key=self.openrouter_api_key,
         )
         sentences = [
@@ -423,7 +420,6 @@ class OpenRouterElevenLabsLlmClient(LlmClient):
             model=self.TEXT_MODEL,
             messages=[{"role": "user", "content": prompt}],
             response_format=UnitTagsSchema,
-            temperature=1.0,
             api_key=self.openrouter_api_key,
         )
         content = response.choices[0].message.content
@@ -531,7 +527,6 @@ class OpenAiLlmClient(LlmClient):
         response = await self._litellm.acompletion(
             model=self.TEXT_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=2.0,
             api_key=self._api_key,
         )
         sentences = [
@@ -577,7 +572,6 @@ class OpenAiLlmClient(LlmClient):
             model=self.TEXT_MODEL,
             messages=[{"role": "user", "content": prompt}],
             response_format=UnitTagsSchema,
-            temperature=2.0,
             api_key=self._api_key,
         )
         content = response.choices[0].message.content
