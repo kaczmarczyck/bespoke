@@ -459,10 +459,15 @@ class OpenRouterElevenLabsLlmClient(LlmClient):
             "Content-Type": "application/json",
         }
         data = {"text": sentence, "model_id": self.ELEVENLABS_MODEL}
-        async with self._httpx.AsyncClient() as client:
-            response = await client.post(url, headers=headers, json=data)
-            response.raise_for_status()
-            return np.frombuffer(response.content, dtype=np.int16)
+        try:
+            async with self._httpx.AsyncClient() as client:
+                response = await client.post(url, headers=headers, json=data)
+                response.raise_for_status()
+                return np.frombuffer(response.content, dtype=np.int16)
+        except self._httpx.HTTPStatusError as e:
+            raise RuntimeError(
+                f"ElevenLabs TTS failed: HTTP {e.response.status_code}"
+            ) from None
 
 
 class OpenAiLlmClient(LlmClient):
