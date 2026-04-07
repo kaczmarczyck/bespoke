@@ -1,10 +1,23 @@
-# <img alt="Bespoke logo" src="docs/icon.png" width="200px">
+<img alt="Bespoke logo" src="docs/icon.png" width="200px">
 
 # Bespoke Language Learning
 
-This is an experimental language learning app using generative AI.
-You listen to, speak, read or write sentences.
-These sentences are chosen to show you vocabulary with spaced repetition.
+Bespoke is a language learning tool that helps you both memorize and apply
+vocabulary in context. Powered by spaced repetition, users are shown sentences
+that connect words that need practice.
+
+Generative AI can help you create large amounts of custom flashcards for any
+language pair. Or, if a dataset already exists, jump straight into learning!
+
+Compared to existing flashcard software, this tool is specialized for
+languages, with the following advantages:
+
+- Depth: Beyond pure memorization, you learn to use vocabulary in sentences.
+- Efficiency: A flashcard can have more than one learnable unit.
+- Cohesion: Supports receptive (listen/read) and expressive (speak/write)
+  skills. It adjusts your review schedule to account for cross-pollination. 🐝
+
+Bespoke is experimental, and we are still learning how to learn better.
 
 ## Overview
 
@@ -15,11 +28,14 @@ The project consists of 2 parts:
 
 ## How to create cards
 
+You may skip this section if you find your languages in
+[Existing datasets](#existing-datasets).
+
 The command below runs Bespoke with
 [uv](https://docs.astral.sh/uv/getting-started/installation/).
 You can also use a different package manager that can read pyproject.toml.
 
-You need ffmpeg installed and an API key.
+You need FFmpeg installed and an API key.
 Depending on what keys you export, the model will be chosen.
 You can use:
 
@@ -41,7 +57,7 @@ The quality of generated cards varies between providers and models.
 ## How to start learning
 
 First, you need to either create or import cards for your language.
-From here on, you won't need ffmpeg or your API key anymore.
+From here on, you won't need FFmpeg or your API key anymore.
 Run this command and a tab should open in your web browser:
 
 ```
@@ -52,7 +68,7 @@ After learning your first card, you can keep learning with a simple
 `uv run learn.py`, or use the full command to choose languages, difficulty and
 modes.
 
-Due to browser restrictions, the first card will not auto play sound.
+Due to browser restrictions, the first card will not autoplay sound.
 All cards after the first will work as expected.
 
 ## Supported languages
@@ -66,6 +82,20 @@ For the target parameter above, try:
 - "Japanese"
 - "Simplified Chinese"
 - "Traditional Chinese"
+
+## Existing datasets
+
+This collection grows as more cards are generated.
+
+| Language Pair | Kaggle Dataset |
+| :------------ | :------------- |
+| German → Traditional Chinese | [bespoke-cards-german-tradchinese](https://www.kaggle.com/datasets/google/bespoke-cards-german-tradchinese) |
+
+Download the dataset and unzip it into the `cards/` directory, so that the
+directory structure looks like, for example:
+
+- `cards/index_trad_chinese_german.json`
+- `cards/trad_chinese_german/*`
 
 ## Disclaimer
 
