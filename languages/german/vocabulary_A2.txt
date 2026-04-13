@@ -481,7 +481,6 @@ sympathisch
 süß
 die Süßigkeit
 das T-Shirt
-das Tablet, der Tablet
 die Tablette
 die Tafel
 das Taschengeld
@@ -548,7 +547,6 @@ versuchen
 der Vertrag
 der Vogel
 voll
-der Volleyball, das Volleyball
 vorbei
 vorbereiten
 vorgestern

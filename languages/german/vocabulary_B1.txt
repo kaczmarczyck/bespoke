@@ -1059,8 +1059,7 @@ neugierig
 die Neuigkeit
 neulich
 die Nichte
-der Nichtraucher, das Nichtraucher
-die Nichtraucherin
+der Nichtraucher, die Nichtraucherin
 niedrig
 nirgendwo
 noch mal
@@ -1781,7 +1780,6 @@ die Zeugin
 ziemlich
 der Zins
 der Zivilstand
-das Znüni, der Znüni
 die Zone
 zubereiten
 der Zufall
