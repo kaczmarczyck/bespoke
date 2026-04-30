@@ -28,12 +28,12 @@ The project consists of 2 parts:
 
 ## How to create cards
 
-You may skip this section if you find your languages in
-[Existing datasets](#existing-datasets).
-
-The command below runs Bespoke with
+The commands below run Bespoke with
 [uv](https://docs.astral.sh/uv/getting-started/installation/).
 You can also use a different package manager that can read pyproject.toml.
+
+You may skip the rest of this section if you find your languages in
+[Existing datasets](#existing-datasets).
 
 You need FFmpeg installed and an API key.
 Depending on what keys you export, the model will be chosen.
@@ -105,6 +105,17 @@ directory structure looks like, for example:
 
 - `cards/index_trad_chinese_german.json`
 - `cards/trad_chinese_german/*`
+
+## Backups
+
+Bespoke does not store or synchronize your data. After cards are generated, it
+runs fully offline. This also means that you are responsible for not losing your
+progress. You may want to regularly copy and save the file `deck_LANGUAGE.json`
+to a secure location of your choice. To learn on a new device, simply copy the
+file over.
+
+At the time, learning on two devices is therefore discouraged. You would need to
+keep the progress file back and forth.
 
 ## Disclaimer
 
