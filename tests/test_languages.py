@@ -19,31 +19,21 @@ from bespoke import languages
 
 
 class TestLanguageData(unittest.TestCase):
-    def test_vocabulary(self) -> None:
+    def test_units(self) -> None:
         language = languages.LANGUAGES["japanese"]
+        units = language.units()
+        self.assertNotEqual(units[0].name(), units[1].name())
+        self.assertEqual(bool(units[0].definition()), bool(units[1].definition()))
+        self.assertEqual(units[0].difficulty(), Difficulty.A1)
+
+    def test_load_grammar(self) -> None:
+        grammar = languages.load_grammar("japanese")
         for d1 in Difficulty:
             for d2 in Difficulty:
                 if d1 == d2:
                     continue
-                vocabulary1 = language.vocabulary(d1)
-                vocabulary2 = language.vocabulary(d2)
-                self.assertTrue(set(vocabulary1).isdisjoint(vocabulary2))
-                self.assertTrue(set(vocabulary1).isdisjoint(vocabulary2))
-
-    def test_full_vocabulary(self) -> None:
-        language = languages.LANGUAGES["japanese"]
-        vocabulary_a1 = language.vocabulary(Difficulty.A1)
-        full_vocabulary = language.full_vocabulary()
-        self.assertEqual(vocabulary_a1, full_vocabulary[: len(vocabulary_a1)])
-
-    def test_grammar(self) -> None:
-        language = languages.LANGUAGES["japanese"]
-        for d1 in Difficulty:
-            for d2 in Difficulty:
-                if d1 == d2:
-                    continue
-                grammar1 = language.grammar(d1)
-                grammar2 = language.grammar(d2)
+                grammar1 = grammar[d1]
+                grammar2 = grammar[d2]
                 self.assertTrue(set(grammar1).isdisjoint(grammar2))
 
 

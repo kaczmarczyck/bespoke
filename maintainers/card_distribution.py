@@ -23,13 +23,12 @@ from bespoke import languages
 
 
 def find_missing_units(card_index: CardIndex, language: Language) -> None:
-    full_vocabulary = language.full_vocabulary()
     total = 0
     max_size = 0
-    max_unit = ""
+    max_unit = None
     print("Units that don't appear in cards:")
     count = 0
-    for unit in full_vocabulary:
+    for unit in language.units():
         size = card_index.size(unit)
         total += size
         if not size:
@@ -39,18 +38,16 @@ def find_missing_units(card_index: CardIndex, language: Language) -> None:
             max_size = size
             max_unit = unit
     print(f"In total, {count} units are untagged on all cards.")
-    print(f"Average number of cards per unit: {total / len(full_vocabulary)}")
+    print(f"Average number of cards per unit: {total / len(language.units())}")
     print(f"Highest number of cards is {max_size} for {max_unit}")
 
 
 def main():
-    for data in languages.LANGUAGE_DATA.values():
-        data._initialize()
     parser = argparse.ArgumentParser(description="Test script.")
     target_choices = {}
-    for code_name in languages.LANGUAGE_DATA:
-        language = languages.LANGUAGES[code_name]
-        target_choices[language.writing_system] = language
+    for language in languages.LANGUAGES.values():
+        if language.has_data():
+            target_choices[language.writing_system] = language
     native_choices = {
         lang.writing_system: lang for lang in languages.LANGUAGES.values()
     }

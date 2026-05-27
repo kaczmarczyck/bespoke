@@ -12,104 +12,68 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Script to evaluate sentence generation quality."""
+"""Script to check sentence generation quality and tagging."""
 
 import argparse
 import asyncio
-import os
-import types
 
-from bespoke import Card
 from bespoke import Difficulty
 from bespoke import Language
 from bespoke import builder
 from bespoke import languages
 from bespoke import llm
-
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
-OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY")
-ELEVENLABS_KEY = os.environ.get("ELEVENLABS_API_KEY")
-OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
-if GEMINI_KEY is None:
-    raise ValueError("GEMINI_API_KEY is not set")
-if OPENROUTER_KEY is None:
-    raise ValueError("OPENROUTER_API_KEY is not set")
-if ELEVENLABS_KEY is None:
-    raise ValueError("ELEVENLABS_API_KEY is not set")
-if OPENAI_KEY is None:
-    raise ValueError("OPENAI_API_KEY is not set")
-
-LLM_CLIENTS = {
-    "gemini": llm.GeminiLlmClient(GEMINI_KEY),
-    "router": llm.OpenRouterElevenLabsLlmClient(OPENROUTER_KEY, ELEVENLABS_KEY),
-    "openai": llm.OpenAiLlmClient(OPENAI_KEY),
-}
+from bespoke import tagger
 
 
-async def produce(name: str, producer: builder.SentenceProducer) -> None:
-    with open(f"output_{name}.txt", "a") as f:
-        while not producer.done():
-            builders, _ = await producer.create()
-            for builder in builders:
-                f.write(f"{builder.sentence}\n")
-            fake_card = Card(
-                id="",
-                sentence="",
-                native_sentence="",
-                audio_filename="",
-                slow_audio_filename="",
-                native_audio_filename="",
-                phonetic="",
-                units=builders[0].hint,
-                unit_tags={},
-                notes=[],
-            )
-            producer.register_card(fake_card)
-
-
-def isolate_difficulty(obj: Language, difficulty: Difficulty) -> Language:
-    original_vocabulary = Language.vocabulary
-
-    def patched_vocabulary(self, d: Difficulty) -> list[str]:
-        if d == difficulty:
-            return original_vocabulary(self, difficulty)
-        return []
-
-    def patched_full_vocabulary(self) -> list[str]:
-        return self.vocabulary(difficulty)
-
-    object.__setattr__(obj, "vocabulary", types.MethodType(patched_vocabulary, obj))
-    object.__setattr__(
-        obj, "full_vocabulary", types.MethodType(patched_full_vocabulary, obj)
+async def tag_and_format(
+    sentence: str,
+    units: list,
+    language: Language,
+    llm_client: llm.LlmClient,
+    producer: builder.SentenceProducer,
+) -> str:
+    unit_tags = await tagger.create_tags(
+        sentence=sentence,
+        hint=units,
+        language=language,
+        llm_client=llm_client,
     )
-    return obj
+    producer.register_card([tag.unit_id for tag in unit_tags])
+    lines = [f"Sentence: {sentence}", "Tags:"]
+    for tag in unit_tags:
+        lines.append(f"  {tag.occurance} -> {tag.unit_id}")
+
+    current_idx = 0
+    untagged_parts = []
+    for tag in unit_tags:
+        occurance = tag.occurance
+        start_idx = sentence.find(occurance, current_idx)
+        if start_idx != -1:
+            gap = sentence[current_idx:start_idx]
+            clean_gap = tagger.strip_punctuation_and_space(gap)
+            if clean_gap:
+                untagged_parts.append(clean_gap)
+            current_idx = start_idx + len(occurance)
+
+    gap = sentence[current_idx:]
+    clean_gap = tagger.strip_punctuation_and_space(gap)
+    if clean_gap:
+        untagged_parts.append(clean_gap)
+
+    if untagged_parts:
+        lines.append(f"Untagged: {', '.join(untagged_parts)}")
+
+    lines.append("--------------------------------------")
+    return "\n".join(lines)
 
 
-async def start_experiment(
-    language: Language, difficulty: Difficulty | None, cards_per_call: int
-) -> None:
-    if difficulty is not None:
-        language = isolate_difficulty(language, difficulty)
-    async with asyncio.TaskGroup() as tg:
-        for name, llm_client in LLM_CLIENTS.items():
-            if difficulty is not None:
-                name = f"{difficulty}_{name}"
-            producer = builder.SentenceProducer(
-                language,
-                llm_client,
-                cards_per_unit=1,
-                cards_per_call=cards_per_call,
-            )
-
-            tg.create_task(produce(name, producer))
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Sentence quality test.")
+async def main_async():
+    parser = argparse.ArgumentParser(description="Check sentence quality and tagging.")
     target_choices = {}
-    for code_name in languages.LANGUAGE_DATA:
-        language = languages.LANGUAGES[code_name]
-        target_choices[language.writing_system] = language
+    for language in languages.LANGUAGES.values():
+        if language.has_data():
+            target_choices[language.writing_system] = language
+
     difficulties = [str(d) for d in Difficulty]
     parser.add_argument(
         "--target",
@@ -121,20 +85,81 @@ def main():
     parser.add_argument(
         "--difficulty",
         type=str,
+        default=None,
         choices=list(difficulties),
-        help="The level of cards you want to generate.",
+        help="Difficulty level of used vocabulary.",
     )
     parser.add_argument(
-        "--cards_per_call", type=int, default=8, help="Number of cards per API call."
+        "--cards_per_call",
+        type=int,
+        default=8,
+        help="Number of cards per call",
     )
+
     args = parser.parse_args()
 
-    target = target_choices[args.target]
-    if args.difficulty is None:
-        difficulty = None
-    else:
+    real_language = target_choices[args.target]
+    grammar = languages.load_grammar(real_language.code_name)
+    llm_client = llm.get_llm_client()
+
+    if args.difficulty:
         difficulty = Difficulty(args.difficulty)
-    asyncio.run(start_experiment(target, difficulty, args.cards_per_call))
+        all_units = real_language.units()
+        filtered_units = [u for u in all_units if u.difficulty() == difficulty]
+        if len(filtered_units) < args.cards_per_call:
+            print(
+                f"Found only {len(filtered_units)} units, need {args.cards_per_call}."
+            )
+            return
+
+        target = Language(
+            name=real_language.name,
+            writing_system=real_language.writing_system,
+            phonetic_system=real_language.phonetic_system,
+            code_name=real_language.code_name,
+        )
+        target._units = filtered_units[: args.cards_per_call]
+        target._units_by_id = {u.id(): u for u in target._units}
+        target._units_by_name = {}
+        for u in target._units:
+            target._units_by_name.setdefault(u.name(), []).append(u)
+        target._initialized = True
+    else:
+        target = real_language
+
+    producer = builder.SentenceProducer(
+        target,
+        llm_client,
+        grammar,
+        cards_per_unit=1,
+        cards_per_call=args.cards_per_call,
+        num_existing_cards=0,
+    )
+
+    generated_count = 0
+    while not producer.done():
+        sentences, units, grammar_used = await producer.create()
+        print(f"Grammar used: {grammar_used}")
+        print("--------------------------------------")
+
+        async with asyncio.TaskGroup() as tg:
+            tasks = []
+            for sentence in sentences:
+                tasks.append(
+                    tg.create_task(
+                        tag_and_format(
+                            sentence, units, real_language, llm_client, producer
+                        )
+                    )
+                )
+
+        for task in tasks:
+            print(task.result())
+        generated_count += len(sentences)
+
+
+def main():
+    asyncio.run(main_async())
 
 
 if __name__ == "__main__":

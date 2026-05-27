@@ -25,8 +25,10 @@ import pydantic
 from typing import Self
 
 from bespoke.languages import Language
-from bespoke.languages import UnitTags
 from bespoke import llm
+from bespoke.unit import Unit
+from bespoke.unit import UnitTag
+from bespoke.unit import UnitTags
 
 CARDS_DIR = Path("cards")
 
@@ -39,71 +41,124 @@ class Card(pydantic.BaseModel):
     slow_audio_filename: str
     native_audio_filename: str
     phonetic: str | None
-    units: list[str]
     unit_tags: UnitTags
     notes: list[str]
 
     model_config = pydantic.ConfigDict(frozen=True)
 
+    def unit_ids(self) -> list[str]:
+        return list(set(t.unit_id for t in self.unit_tags if t.unit_id))
+
+    @pydantic.model_validator(mode="after")
+    def _verify_tags_sorted(self) -> "Card":
+        sentence_index = 0
+        for tag in self.unit_tags:
+            start_idx = self.sentence.find(tag.occurance, sentence_index)
+            if start_idx < 0:
+                raise ValueError(
+                    f"Tag occurance '{tag.occurance}' not found in sentence after index {sentence_index}"
+                )
+            sentence_index = start_idx + len(tag.occurance)
+        return self
+
+    def split_into_parts(self) -> list[UnitTag]:
+        parts = []
+        sentence_index = 0
+        for tag in self.unit_tags:
+            start_idx = self.sentence.find(tag.occurance, sentence_index)
+            if start_idx >= 0:
+                if start_idx > sentence_index:
+                    parts.append(
+                        UnitTag(
+                            occurance=self.sentence[sentence_index:start_idx],
+                            unit_id="",
+                        )
+                    )
+                parts.append(tag)
+                sentence_index = start_idx + len(tag.occurance)
+        if sentence_index < len(self.sentence):
+            parts.append(UnitTag(occurance=self.sentence[sentence_index:], unit_id=""))
+        return parts
+
     def __str__(self) -> str:
         parts = []
-        for occurance, unit in self.split_into_parts():
-            if unit is None:
-                parts.append(occurance)
+        for tag in self.split_into_parts():
+            if not tag.unit_id:
+                parts.append(tag.occurance)
             else:
-                parts.append(f"[{occurance}]({unit})")
+                parts.append(f"[{tag.occurance}]({tag.unit_id})")
         return f"Card: {''.join(parts)} = {self.native_sentence}"
-
-    def split_into_parts(self) -> list[tuple[str, str | None]]:
-        sorted_tags = list(self.unit_tags.items())
-        sorted_tags.sort(key=lambda x: len(x[1]), reverse=True)
-        sorted_tags.sort(key=lambda x: len(x[0]), reverse=True)
-        result: list[tuple[str, str | None]] = [(self.sentence, None)]
-        for word, unit in sorted_tags:
-            new_result = []
-            found = False
-            for part, tag in result:
-                if found or tag is not None or word not in part:
-                    new_result.append((part, tag))
-                    continue
-                prefix, suffix = part.split(word, maxsplit=1)
-                if prefix.strip():
-                    new_result.append((prefix.strip(), None))
-                new_result.append((word, unit))
-                if suffix.strip():
-                    new_result.append((suffix.strip(), None))
-                found = True
-            result = new_result
-        return result
 
     def write_json(self, directory: Path) -> None:
         path = directory / f"{self.id}.json"
         with open(path, "w", encoding="utf-8") as f:
             f.write(self.model_dump_json())
 
+    @classmethod
+    def load(cls, directory: Path, card_id: str) -> "Card | None":
+        path = directory / f"{card_id}.json"
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+                try:
+                    return cls.model_validate_json(content)
+                except pydantic.ValidationError:
+                    try:
+                        old_card = OldCard.model_validate_json(content)
+                        return old_card.to_card()
+                    except pydantic.ValidationError:
+                        print(f"Failed to read card from file '{path}'")
+        except OSError as e:
+            print(f"An error occurred while accessing '{path}': {e}")
+        return None
 
-def _load_card(directory: Path, card_id: str) -> Card | None:
-    path = directory / f"{card_id}.json"
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return Card.model_validate_json(f.read())
-    except pydantic.ValidationError:
-        print(f"Failed to read card from file '{path}'")
-    except OSError as e:
-        print(f"An error occurred while accessing '{path}': {e}")
-    return None
+    @classmethod
+    async def load_async(cls, directory: Path, card_id: str) -> "Card | None":
+        path = directory / f"{card_id}.json"
+        try:
+            async with aiofiles.open(path, mode="r", encoding="utf-8") as f:
+                content = await f.read()
+                try:
+                    return cls.model_validate_json(content)
+                except pydantic.ValidationError:
+                    try:
+                        old_card = OldCard.model_validate_json(content)
+                        return old_card.to_card()
+                    except pydantic.ValidationError:
+                        print(f"Failed to read card from file '{path}'")
+        except OSError as e:
+            print(f"An error occurred while accessing '{path}': {e}")
+        return None
 
 
-async def _load_card_async(directory: Path, card_id: str) -> Card | None:
-    path = directory / f"{card_id}.json"
-    try:
-        async with aiofiles.open(path, mode="r", encoding="utf-8") as f:
-            return Card.model_validate_json(await f.read())
-    except pydantic.ValidationError:
-        print(f"Failed to read card from file '{path}'")
-    except OSError as e:
-        print(f"An error occurred while accessing '{path}': {e}")
-    return None
+class OldCard(pydantic.BaseModel):
+    id: str
+    sentence: str
+    native_sentence: str
+    audio_filename: str
+    slow_audio_filename: str
+    native_audio_filename: str
+    phonetic: str | None
+    units: list[str]
+    unit_tags: dict[str, str]
+    notes: list[str]
+
+    def to_card(self) -> Card:
+        new_unit_tags = [
+            UnitTag(occurance=k, unit_id=v) for k, v in self.unit_tags.items()
+        ]
+        new_unit_tags.sort(key=lambda tag: self.sentence.find(tag.occurance))
+        return Card(
+            id=self.id,
+            sentence=self.sentence,
+            native_sentence=self.native_sentence,
+            audio_filename=self.audio_filename,
+            slow_audio_filename=self.slow_audio_filename,
+            native_audio_filename=self.native_audio_filename,
+            phonetic=self.phonetic,
+            unit_tags=new_unit_tags,
+            notes=self.notes,
+        )
 
 
 async def _write_ogg(audio: np.ndarray, filename: str, bitrate="16k") -> None:
@@ -180,6 +235,9 @@ class CardIndex:
         try:
             with open(obj._index_path, "r", encoding="utf-8") as f:
                 obj._index = json.load(f)
+            if obj._index:
+                use_def = all(" - " in k for k in obj._index.keys())
+                target_language.initialize(use_definition=use_def)
         except Exception:
             print(f"Unable to open {obj._index_path}, creating empty CardIndex.")
         return obj
@@ -218,20 +276,20 @@ class CardIndex:
         with open(self._index_path, "w", encoding="utf-8") as f:
             json.dump(self._index, f)
 
-    def cards(self, unit: str) -> list[Card]:
-        card_ids = self._index.get(unit, [])
+    def cards(self, unit: Unit) -> list[Card]:
+        card_ids = self._index.get(unit.id(), [])
         cards = []
         for card_id in card_ids:
-            card = _load_card(self._card_directory, card_id)
+            card = Card.load(self._card_directory, card_id)
             if card is not None:
                 cards.append(card)
         return cards
 
-    async def cards_async(self, unit: str) -> list[Card]:
-        card_ids = self._index.get(unit, [])
+    async def cards_async(self, unit: Unit) -> list[Card]:
+        card_ids = self._index.get(unit.id(), [])
         tasks = []
         for card_id in card_ids:
-            tasks.append(_load_card_async(self._card_directory, card_id))
+            tasks.append(Card.load_async(self._card_directory, card_id))
         cards = await asyncio.gather(*tasks)
         return [card for card in cards if card is not None]
 
@@ -240,17 +298,17 @@ class CardIndex:
 
         async def read_card_file(card_id: str) -> Card | None:
             async with semaphore:
-                return await _load_card_async(self._card_directory, card_id)
+                return await Card.load_async(self._card_directory, card_id)
 
         tasks = [read_card_file(p.stem) for p in self._card_directory.glob("*.json")]
         cards = await asyncio.gather(*tasks)
         return [card for card in cards if card is not None]
 
-    def size(self, unit: str) -> int:
-        return len(self._index.get(unit, []))
+    def size(self, unit: Unit) -> int:
+        return len(self._index.get(unit.id(), []))
 
     def _add(self, card: Card) -> None:
-        for unit in card.units:
+        for unit in card.unit_ids():
             card_ids = self._index.get(unit, [])
             card_ids.append(card.id)
             self._index[unit] = card_ids
@@ -284,7 +342,6 @@ class CardIndex:
             slowly=False,
         )
         phonetic = await llm_client.to_phonetic(sentence, self._target_language)
-        units = list(set(unit_tags.values()))
         card = Card(
             id=id,
             sentence=sentence,
@@ -293,7 +350,6 @@ class CardIndex:
             slow_audio_filename=slow_audio_filename,
             native_audio_filename=native_audio_filename,
             phonetic=phonetic,
-            units=units,
             unit_tags=unit_tags,
             notes=notes,
         )

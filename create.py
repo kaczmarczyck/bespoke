@@ -16,11 +16,14 @@
 
 import argparse
 import asyncio
+import warnings
 
 from bespoke import CardIndex
 from bespoke import DeckBuilder
 from bespoke import languages
 from bespoke import llm
+
+warnings.filterwarnings("ignore", message=".*is not a valid FinishReason.*")
 
 
 async def create(
@@ -31,7 +34,8 @@ async def create(
 ) -> None:
     card_index = CardIndex.load(target, native)
     llm_client = llm.get_llm_client()
-    deck_builder = DeckBuilder(target, card_index, llm_client)
+    grammar = languages.load_grammar(target.code_name)
+    deck_builder = DeckBuilder(target, card_index, llm_client, grammar)
     await deck_builder.create_cards(
         cards_per_unit=cards_per_unit,
         cards_per_call=cards_per_call,
@@ -42,9 +46,9 @@ async def create(
 def main():
     parser = argparse.ArgumentParser(description="Create language cards.")
     target_choices = {}
-    for code_name in languages.LANGUAGE_DATA:
-        language = languages.LANGUAGES[code_name]
-        target_choices[language.writing_system] = language
+    for language in languages.LANGUAGES.values():
+        if language.has_data():
+            target_choices[language.writing_system] = language
     native_choices = {
         lang.writing_system: lang for lang in languages.LANGUAGES.values()
     }

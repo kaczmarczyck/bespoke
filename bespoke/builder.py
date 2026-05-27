@@ -19,117 +19,86 @@ from collections import defaultdict
 from datetime import datetime
 import random
 
-from bespoke.card import Card
 from bespoke.card import CardIndex
 from bespoke.languages import Difficulty
-from bespoke.languages import UnitTags
 from bespoke.languages import Language
 from bespoke import llm
-
-
-class UnitTagsBuilder:
-    """Helper class to iteratively build the UnitTags."""
-
-    DONE_AFTER = 1
-
-    def __init__(self, sentence: str, hint: list[str]) -> None:
-        self.sentence = sentence
-        self.unit_tags: UnitTags = {}
-        self.hint = list(hint)
-        self._no_progress_counter = 0
-
-    def add_filtered(
-        self,
-        new_tag_list: list[tuple[str, str]],
-        vocabulary: list[str],
-    ) -> None:
-        old_tags = self.unit_tags
-        all_tags = new_tag_list + list(self.unit_tags.items())
-        all_tags.sort(key=lambda x: len(x[1]), reverse=True)
-        all_tags.sort(key=lambda x: len(x[0]), reverse=True)
-        sentence = self.sentence
-        used_units = set()
-        filtered = {}
-        for word, unit in all_tags:
-            if word not in sentence:
-                continue
-            if unit not in vocabulary:
-                continue
-            if unit in used_units:
-                continue
-            sentence = sentence.replace(word, "", 1)
-            filtered[word] = unit
-            used_units.add(unit)
-        self.unit_tags = filtered
-        # Any function that can not increase indefinitely can work here.
-        if len(old_tags) >= len(self.unit_tags):
-            self._no_progress_counter += 1
-
-    def done(self) -> bool:
-        return self._no_progress_counter >= self.DONE_AFTER
+from bespoke.unit import Unit
+from bespoke import tagger
 
 
 class UnitProducer:
     """Helper class that tracks progress for cards per units."""
 
-    # TODO check if the heuristic works
-    # otherwise only count fitting cards
+    # Used to not draw cards when they were registered often enough.
     DRAW_BUFFER = 4
 
     def __init__(
         self,
         language: Language,
         cards_per_unit: int,
+        num_existing_cards: int,
     ) -> None:
         self._cards_per_unit = cards_per_unit
         self._card_count: dict[str, int] = defaultdict(int)
         self._fitting_count: dict[str, int] = defaultdict(int)
-        self._units_remaining = {d: language.vocabulary(d) for d in Difficulty}
+        self._units_remaining: dict[Difficulty, list[Unit]] = {
+            d: [] for d in Difficulty
+        }
+        for unit in language.units():
+            self._units_remaining[unit.difficulty()].append(unit)
         # Lazy initialization to allow register to affect the first draw / done.
-        self._unit_pools: dict[Difficulty, list[str]] = {}
+        self._unit_pools: dict[Difficulty, list[Unit]] = {}
         self._done = False
 
-    def draw(self, count: int) -> tuple[list[str], Difficulty]:
+        num_units = len(language.units())
+        initial_draw_count = num_existing_cards // num_units if num_units > 0 else 0
+        self._draw_count: dict[str, int] = defaultdict(lambda: initial_draw_count)
+
+    def draw(self, count: int) -> tuple[list[Unit], Difficulty]:
         """Returns random units that need more cards.
 
         You may not call draw when done.
         """
-        if not self._unit_pools:
-            self._refill()
+        self._refill_if_empty()
         units = []
         chosen_difficulty = None
         for difficulty in Difficulty:
             unit_pool = self._unit_pools[difficulty]
             if unit_pool:
                 units = unit_pool[:count]
+                for u in units:
+                    self._draw_count[u.id()] += 1
                 chosen_difficulty = difficulty
                 self._unit_pools[difficulty] = unit_pool[count:]
                 break
-        if all(not pool for pool in self._unit_pools.values()):
-            self._refill()
         assert chosen_difficulty is not None
         return units, chosen_difficulty
 
-    def register(self, unit: str, is_fitting: bool) -> None:
-        self._card_count[unit] += 1
+    def register(self, unit: Unit, is_fitting: bool) -> None:
+        self._card_count[unit.id()] += 1
         if is_fitting:
-            self._fitting_count[unit] += 1
+            self._fitting_count[unit.id()] += 1
 
     def done(self) -> bool:
-        if not self._unit_pools:
-            self._refill()
+        self._refill_if_empty()
         return self._done
 
-    def _refill(self) -> None:
+    def _refill_if_empty(self) -> None:
+        if self._unit_pools and any(pool for pool in self._unit_pools.values()):
+            return
         size = 0
         total = 0
         for difficulty in Difficulty:
             remaining = []
             for unit in self._units_remaining[difficulty]:
-                if self._fitting_count[unit] < self._cards_per_unit:
+                if (
+                    self._fitting_count[unit.id()] < self._cards_per_unit
+                    and self._draw_count[unit.id()] < self._cards_per_unit * 2
+                ):
                     remaining.append(unit)
                     size += 1
-                    total += self._card_count[unit]
+                    total += self._card_count[unit.id()]
             self._units_remaining[difficulty] = remaining
         self._done = not size
         if self._done:
@@ -139,7 +108,7 @@ class UnitProducer:
         for difficulty in Difficulty:
             unit_pool = []
             for unit in self._units_remaining[difficulty]:
-                if self._card_count[unit] < count_average + self.DRAW_BUFFER:
+                if self._card_count[unit.id()] < count_average + self.DRAW_BUFFER:
                     unit_pool.append(unit)
             self._unit_pools[difficulty] = unit_pool
 
@@ -151,23 +120,22 @@ class SentenceProducer:
         self,
         language: Language,
         llm_client: llm.LlmClient,
+        grammar: dict[Difficulty, list[str]],
         *,
         cards_per_unit: int,
         cards_per_call: int,
+        num_existing_cards: int,
     ) -> None:
         self._language = language
         self._llm_client = llm_client
+        self._grammar = grammar
         self._cards_per_call = cards_per_call
-        self._unit_producer = UnitProducer(language, cards_per_unit)
+        self._unit_producer = UnitProducer(language, cards_per_unit, num_existing_cards)
         self._grammar_pools: dict[Difficulty, list[str]] = {}
         # Data structures to quickly operate on difficulties.
         self._difficulty_order = {d: i for i, d in enumerate(Difficulty)}
-        self._difficulty_map = {}
-        for difficulty in Difficulty:
-            for word in self._language.vocabulary(difficulty):
-                self._difficulty_map[word] = difficulty
 
-    async def create(self) -> tuple[list[UnitTagsBuilder], str]:
+    async def create(self) -> tuple[list[str], list[Unit], str]:
         units, difficulty = self._unit_producer.draw(self._cards_per_call)
         grammar = self._sample_grammar(difficulty)
         sentences = await self._llm_client.create_sentences(
@@ -176,16 +144,24 @@ class SentenceProducer:
             grammar=grammar,
             units=units,
         )
-        return [UnitTagsBuilder(s, units) for s in sentences], grammar
+        return sentences, units, grammar
 
-    def register_card(self, card: Card) -> None:
-        difficulties = {u: self._difficulty_map[u] for u in card.units}
+    def register_card(self, unit_ids: list[str]) -> None:
+        difficulties = {}
+        for unit_id in unit_ids:
+            unit = self._language.get_by_id(unit_id)
+            if unit:
+                difficulties[unit_id] = unit.difficulty()
+        if not difficulties:
+            return
         max_difficulty = max(
             difficulties.values(), key=lambda d: self._difficulty_order[d]
         )
-        for unit, difficulty in difficulties.items():
+        for unit_id, difficulty in difficulties.items():
             is_fitting = difficulty == max_difficulty
-            self._unit_producer.register(unit, is_fitting)
+            unit = self._language.get_by_id(unit_id)
+            if unit:
+                self._unit_producer.register(unit, is_fitting)
 
     def done(self) -> bool:
         return self._unit_producer.done()
@@ -194,7 +170,7 @@ class SentenceProducer:
         grammar_pool = self._grammar_pools.get(difficulty, [])
         if not grammar_pool:
             for d in Difficulty:
-                grammar_pool += self._language.grammar(d)
+                grammar_pool += list(self._grammar.get(d, []))
                 if d == difficulty:
                     break
             random.shuffle(grammar_pool)
@@ -211,11 +187,12 @@ class DeckBuilder:
         target_language: Language,
         card_index: CardIndex,
         llm_client: llm.LlmClient,
+        grammar: dict[Difficulty, list[str]],
     ) -> None:
         self._language = target_language
         self._card_index = card_index
         self._llm_client = llm_client
-        self._full_vocabulary = self._language.full_vocabulary()
+        self._grammar = grammar
         self._duplicates: set[str] = set()
         self._start_time: datetime | None = None
         self._created_count = 0
@@ -227,31 +204,35 @@ class DeckBuilder:
         cards_per_call: int,
     ) -> None:
         self._duplicates = set()
+        all_cards = await self._card_index.all_cards()
         sentence_producer = SentenceProducer(
             self._language,
             self._llm_client,
+            self._grammar,
             cards_per_unit=cards_per_unit,
             cards_per_call=cards_per_call,
+            num_existing_cards=len(all_cards),
         )
-        for card in await self._card_index.all_cards():
+        for card in all_cards:
             self._duplicates.add(card.sentence)
-            sentence_producer.register_card(card)
+            sentence_producer.register_card(card.unit_ids())
         self._start_time = datetime.now()
         print(f"Initialized with {len(self._duplicates)} existing cards")
 
         semaphore = asyncio.Semaphore(self.MAX_PARALLELISM)
         async with asyncio.TaskGroup() as tg:
+            # Don't waste resources on units that don't get created.
             while not sentence_producer.done():
-                builders, grammar = await sentence_producer.create()
-                for builder in builders:
-                    if builder.sentence in self._duplicates:
-                        print(f"Skipping duplicate sentence {builder.sentence}")
+                sentences, units, grammar = await sentence_producer.create()
+                for sentence in sentences:
+                    if sentence in self._duplicates:
+                        print(f"Skipping duplicate sentence {sentence}")
                         continue
-                    self._duplicates.add(builder.sentence)
+                    self._duplicates.add(sentence)
                     await semaphore.acquire()
                     tg.create_task(
                         self._complete_card(
-                            semaphore, sentence_producer, builder, grammar
+                            semaphore, sentence_producer, sentence, units, grammar
                         )
                     )
                 self._card_index.save()
@@ -260,27 +241,28 @@ class DeckBuilder:
         self,
         semaphore: asyncio.Semaphore,
         sentence_producer: SentenceProducer,
-        builder: UnitTagsBuilder,
+        sentence: str,
+        units: list[Unit],
         grammar: str,
     ) -> None:
         try:
-            for unit in self._full_vocabulary:
-                if unit in builder.sentence and unit not in builder.hint:
-                    builder.hint.append(unit)
-            while not builder.done():
-                new_tag_list = await self._llm_client.tag_sentence(
-                    sentence=builder.sentence,
-                    language=self._language,
-                    hint=builder.hint,
-                )
-                builder.add_filtered(new_tag_list, self._full_vocabulary)
-            if not builder.unit_tags:
-                print(f"Discarding untagged sentence: '{builder.sentence}'")
-                return
-            card = await self._card_index.create_card(
-                self._llm_client, builder.sentence, builder.unit_tags, notes=[grammar]
+            unit_tags = await tagger.create_tags(
+                sentence=sentence,
+                hint=units,
+                language=self._language,
+                llm_client=self._llm_client,
             )
-            sentence_producer.register_card(card)
+            if not unit_tags:
+                print(f"Discarding untagged sentence: '{sentence}'")
+                return
+
+            card = await self._card_index.create_card(
+                self._llm_client,
+                sentence,
+                unit_tags,
+                notes=[grammar],
+            )
+            sentence_producer.register_card(card.unit_ids())
             self._created_count += 1
             if self._created_count % 1000 == 0 or self._created_count == 100:
                 assert self._start_time is not None
@@ -288,6 +270,6 @@ class DeckBuilder:
                 time_string = str(elapsed).split(".")[0]
                 print(f"{self._created_count:>5} cards after : {time_string}")
         except Exception as e:
-            print(f"Error processing sentence '{builder.sentence}': {e}")
+            print(f"Error processing sentence '{sentence}': {e}")
         finally:
             semaphore.release()

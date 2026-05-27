@@ -48,9 +48,9 @@ def show_cards(deck: Deck) -> None:
 
     current_time = datetime.datetime.now().timestamp()
     urgency_states = deck._compute_urgencies(current_time)
-    mode, unit = deck._choose_task(urgency_states)
-    print(f"Next unit is '{unit}'")
-    state = urgency_states[unit]
+    mode, unit_id = deck._choose_task(urgency_states)
+    print(f"Next unit is '{unit_id}'")
+    state = urgency_states[unit_id]
     print(f"        Is touched: {state.is_touched}")
     print(f"Needs introduction: {state.needs_introduction}")
     print(f"         Is target: {state.is_target}")
@@ -58,7 +58,10 @@ def show_cards(deck: Deck) -> None:
     print(f"              Mode: {state.mode}")
     print("")
 
-    cards = deck._card_index.cards(unit)
+    unit = deck._target_language.get_by_id(unit_id)
+    cards = []
+    if unit:
+        cards = deck._card_index.cards(unit)
     card_scores = []
     for card in cards:
         score = deck._score_card(card, urgency_states, current_time)
@@ -76,9 +79,9 @@ def show_cards(deck: Deck) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Create language cards.")
     target_choices = {}
-    for code_name in languages.LANGUAGE_DATA:
-        language = languages.LANGUAGES[code_name]
-        target_choices[language.writing_system] = language
+    for language in languages.LANGUAGES.values():
+        if language.has_data():
+            target_choices[language.writing_system] = language
     parser.add_argument(
         "--target",
         type=str,

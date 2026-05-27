@@ -24,6 +24,7 @@ from bespoke import CardIndex
 from bespoke import Deck
 from bespoke import Difficulty
 from bespoke import Mode
+from bespoke import Language
 from bespoke import languages
 
 
@@ -43,7 +44,13 @@ SCORE_ROTATION = {
 
 
 class RatingWebApp:
-    def __init__(self, deck: Deck, deck_filename: str) -> None:
+    def __init__(
+        self,
+        target_language: Language,
+        deck: Deck,
+        deck_filename: str,
+    ) -> None:
+        self._target_language = target_language
         self._deck = deck
         self._deck_filename = deck_filename
         self._ratings: dict[str, int] = {}
@@ -79,7 +86,9 @@ class RatingWebApp:
             else:
                 ui.icon("volume_off", color="grey").tooltip(f"Missing file: {filename}")
 
-    def _create_color_cycling_button(self, word: str, unit: str) -> ui.button:
+    def _create_color_cycling_button(
+        self, word: str, unit: str, def_label: ui.label
+    ) -> ui.button:
         initial_rating = 0
         self._ratings[unit] = initial_rating
         btn = ui.button(word, on_click=lambda e: cycle(e.sender))
@@ -89,6 +98,8 @@ class RatingWebApp:
             rating = SCORE_ROTATION.get(self._ratings[unit], initial_rating)
             self._ratings[unit] = rating
             b.props(f"color={COLOR_MAP[rating]}")
+
+            def_label.text = self._deck.translated_definition(unit)
 
         return btn
 
@@ -165,18 +176,27 @@ class RatingWebApp:
                 "text-sm text-gray-400 dark:text-gray-300 mt-4"
             )
             row_container = ui.row().classes("wrap justify-center gap-2 w-full")
+            definition_label = ui.label("").classes(
+                "w-full text-center text-sm text-gray-800 dark:text-gray-300 h-6 mt-2"
+            )
             all_buttons = []
 
             with row_container:
-                for part, unit in self._card.split_into_parts():
-                    if unit is None:
-                        ui.label(part).classes("self-center text-lg p-2")
+                for tag in self._card.split_into_parts():
+                    if not tag.unit_id:
+                        ui.label(tag.occurance).classes(
+                            "self-center text-lg p-2 text-black dark:text-white"
+                        )
                     else:
                         with ui.column().classes("items-center gap-0"):
-                            btn = self._create_color_cycling_button(part, unit)
-                            all_buttons.append((unit, btn))
-                            ui.label(unit).classes(
-                                "text-[10px] text-[#888] dark:text-gray-400"
+                            btn = self._create_color_cycling_button(
+                                tag.occurance, tag.unit_id, definition_label
+                            )
+                            all_buttons.append((tag.unit_id, btn))
+                            u = self._target_language.get_by_id(tag.unit_id)
+                            name = u.name() if u else tag.unit_id
+                            ui.label(name).classes(
+                                "text-[10px] text-gray-700 dark:text-gray-400"
                             )
 
             # 4. Controls
@@ -191,15 +211,19 @@ class RatingWebApp:
                 ui.button("All Success", on_click=make_all_green).props(
                     "outline color=positive"
                 )
-                report_switch = ui.switch("Report Error")
+                report_switch = ui.switch("Report Error").classes(
+                    "text-black dark:text-white"
+                )
 
             ui.button(
                 "Next", on_click=lambda: self._finalize(report_switch.value)
             ).props("color=primary size=lg").classes("w-full")
 
     def _finalize(self, is_reported) -> None:
-        for unit, rating in self._ratings.items():
-            self._deck.rate(unit, self._mode, rating)
+        for unit_id, rating in self._ratings.items():
+            unit = self._target_language.get_by_id(unit_id)
+            if unit:
+                self._deck.rate(unit, self._mode, rating)
         self._deck.log_usage(self._card.id, is_reported=is_reported)
         self._deck.save(self._deck_filename)
 
@@ -225,9 +249,9 @@ def open_deck() -> tuple[Deck, str]:
 
     parser = argparse.ArgumentParser(description="Learn language cards.")
     target_choices = {}
-    for code_name in languages.LANGUAGE_DATA:
-        language = languages.LANGUAGES[code_name]
-        target_choices[language.writing_system] = language
+    for language in languages.LANGUAGES.values():
+        if language.has_data():
+            target_choices[language.writing_system] = language
     native_choices = {
         lang.writing_system: lang for lang in languages.LANGUAGES.values()
     }
@@ -300,7 +324,7 @@ def index():
         ui.label("Bespoke").classes(
             "text-3xl font-light text-gray-600 dark:text-gray-300 mb-6"
         )
-        RatingWebApp(deck, deck_filename)
+        RatingWebApp(deck._target_language, deck, deck_filename)
 
 
 ui.run(title="Bespoke", favicon="🐝")
