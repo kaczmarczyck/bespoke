@@ -56,42 +56,34 @@ The quality of generated cards varies between providers and models.
 
 ## How to start learning
 
-First, you need to either create or import cards for your language.
-From here on, you won't need FFmpeg or your API key anymore.
-Run this command and a tab should open in your web browser:
+Bespoke runs as an **offline-first Progressive Web App (PWA)**. The scheduling, card index, and audio BLOBs are queried entirely in the browser using SQLite compiled to WebAssembly (WASM).
 
+### 1. Compile the cards database
+Before you start learning, you need to compile your generated flat card JSON files and audio `.ogg` files into a single SQLite database:
+
+```bash
+uv run package_db.py --target="german" --native="english" --output="cards/german_english.db"
 ```
-uv run learn.py --target="Japanese" --native="English" --difficulty=A1 --use_read_mode
+*(Use the language code names, e.g., `german`, `japanese`, `simp_chinese`, `trad_chinese`)*.
+
+### 2. Launch the application
+Run the local static server:
+
+```bash
+uv run learn.py
 ```
+A new tab will automatically open in your default browser at `http://localhost:8080/`.
 
-After learning your first card, you can keep learning with a simple
-`uv run learn.py`, or use the full command to choose languages, difficulty and
-modes.
+### 3. Study and Go Offline
+- In the browser UI, choose the deck you want to learn.
+- Click **Download** next to the deck. This stores the single SQLite database inside your browser's high-performance **Origin Private File System (OPFS)**.
+- Once downloaded, the deck runs **100% offline**! You can close the local python server, turn off your internet, and continue learning, playing audio on demand, and tracking reviews completely offline.
 
-Due to browser restrictions, the first card will not autoplay sound.
-All cards after the first will work as expected.
-
-## Supported languages
-
-You can find instructions in [languages.py](bespoke/languages.py) to add
-languages, both as a target for learning and your native language.
-
-For the target parameter above, try:
-
-- "German"
-- "Japanese"
-- "Simplified Chinese"
-- "Traditional Chinese"
+---
 
 ## Existing datasets
 
-This collection grows as more cards are generated.
-
-You can download any of the existing datasets automatically using, e.g.:
-
-```
-uv run download.py --target="Traditional Chinese" --native="German"
-```
+You can download existing pre-generated language datasets:
 
 | Language Pair | Kaggle Dataset |
 | :------------ | :------------- |
@@ -99,28 +91,23 @@ uv run download.py --target="Traditional Chinese" --native="German"
 | English → German | [bespoke-cards-english-german](https://www.kaggle.com/datasets/google/bespoke-cards-english-german) |
 | Simplified Chinese → German | [bespoke-cards-german-simpchinese](https://www.kaggle.com/datasets/google/bespoke-cards-simpchinese-german) |
 
-Alternatively, if you prefer to download manually, you can obtain the `.zip`
-file directly from the links in the table above. Download the dataset into the
-`cards/` directory and extract it:
+Download the dataset `.zip` file into the `cards/` directory, unzip it, and compile it to SQLite:
 
-```
+```bash
+# Example for English to German
 cd cards/
-unzip dataset_filename.zip
+unzip bespoke-cards-english-german.zip
+cd ..
+uv run package_db.py --target="german" --native="english" --output="cards/german_english.db"
 ```
 
-Ensure the `cards/` directory contains `index_trad_chinese_german.json` and
-`trad_chinese_german/`.
+---
 
-## Backups
+## Backups & Progress
 
-Bespoke does not store or synchronize your data. After cards are generated, it
-runs fully offline. This also means that you are responsible for not losing your
-progress. You may want to regularly copy and save the file `deck_LANGUAGE.json`
-to a secure location of your choice. To learn on a new device, simply copy the
-file over.
+All review history, ratings, and scheduling states are saved inside the local SQLite database inside your browser's secure sandboxed storage (OPFS). 
 
-At the time, learning on two devices is therefore discouraged. You would need to
-copy the progress file back and forth.
+Because the app is fully serverless on the client side, your progress is tied to your browser profile. If you clear your browser site data or cookies for the local domain, your local database state (including history progress) will be reset.
 
 ## Disclaimer
 
