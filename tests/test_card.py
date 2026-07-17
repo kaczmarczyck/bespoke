@@ -316,6 +316,101 @@ class TestCard(unittest.IsolatedAsyncioTestCase):
             finally:
                 bespoke.card.CARDS_DIR = original_cards_dir
 
+    def test_package_db(self) -> None:
+        import sqlite3
+        import csv
+        import json
+        import package_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            original_cards_dir = package_db.CARDS_DIR
+            original_languages_dir = package_db.LANGUAGES_DIR
+            package_db.CARDS_DIR = tmp_path / "cards"
+            package_db.LANGUAGES_DIR = tmp_path / "languages"
+
+            try:
+                package_db.CARDS_DIR.mkdir()
+                package_db.LANGUAGES_DIR.mkdir()
+
+                target_lang_dir = package_db.LANGUAGES_DIR / "simp_chinese"
+                target_lang_dir.mkdir()
+                with open(
+                    target_lang_dir / "vocabulary.csv",
+                    "w",
+                    encoding="utf-8",
+                    newline="",
+                ) as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["name", "definition", "difficulty"])
+                    writer.writerow(["爱", "liebe", "A1"])
+                    writer.writerow(["爸爸", "papa", "A1"])
+
+                index_data = {"爱": ["card_1"], "爸爸": ["card_1"]}
+                with open(
+                    package_db.CARDS_DIR / "index_simp_chinese_german.json",
+                    "w",
+                    encoding="utf-8",
+                ) as f:
+                    json.dump(index_data, f)
+
+                pair_dir = package_db.CARDS_DIR / "simp_chinese_german"
+                pair_dir.mkdir()
+
+                audio_path = pair_dir / "card_1.ogg"
+                audio_path.write_bytes(b"mock_audio_bytes")
+
+                card_data = {
+                    "id": "card_1",
+                    "sentence": "我爱爸爸。",
+                    "native_sentence": "Ich liebe Papa.",
+                    "audio_filename": str(audio_path),
+                    "slow_audio_filename": "",
+                    "native_audio_filename": "",
+                    "phonetic": "Wǒ ài bàba.",
+                    "unit_tags": [
+                        {"occurance": "爱", "unit_id": "爱"},
+                        {"occurance": "爸爸", "unit_id": "爸爸"},
+                    ],
+                    "notes": [],
+                }
+                with open(pair_dir / "card_1.json", "w", encoding="utf-8") as f:
+                    json.dump(card_data, f)
+
+                db_path = tmp_path / "test.db"
+                package_db.package_language_pair("simp_chinese", "german", db_path)
+
+                self.assertTrue(db_path.exists())
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+
+                cursor.execute("SELECT id, sentence, audio FROM cards")
+                rows = cursor.fetchall()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0][0], "card_1")
+                self.assertEqual(rows[0][1], "我爱爸爸。")
+                self.assertEqual(rows[0][2], b"mock_audio_bytes")
+
+                cursor.execute(
+                    "SELECT unit_id, card_id FROM unit_cards ORDER BY unit_id"
+                )
+                unit_rows = cursor.fetchall()
+                self.assertEqual(unit_rows, [("爱", "card_1"), ("爸爸", "card_1")])
+
+                cursor.execute(
+                    "SELECT id, name, definition, difficulty FROM vocabulary ORDER BY id"
+                )
+                vocab_rows = cursor.fetchall()
+                self.assertEqual(
+                    vocab_rows,
+                    [("爱", "爱", "liebe", "A1"), ("爸爸", "爸爸", "papa", "A1")],
+                )
+
+                conn.close()
+            finally:
+                package_db.CARDS_DIR = original_cards_dir
+                package_db.LANGUAGES_DIR = original_languages_dir
+
 
 if __name__ == "__main__":
     unittest.main()
