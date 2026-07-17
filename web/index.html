@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bespoke</title>
+    <link rel="icon" type="image/svg+xml" href="/icon.svg">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#121214">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <!-- Google Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <!-- Style -->
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body class="dark-mode">
+    <div id="app">
+        <header class="app-header">
+            <h1 class="logo">Bespoke <span>🐝</span></h1>
+            <div class="header-actions">
+                <button id="btn-back-to-decks" class="icon-button hidden" title="Switch Deck">
+                    <span class="material-icons">style</span>
+                </button>
+            </div>
+        </header>
+
+        <main class="app-content">
+            <!-- 1. START/DECK SELECTION SCREEN -->
+            <section id="screen-decks" class="screen active">
+                <div class="content-card">
+                    <h2>Your Learning Decks</h2>
+                    <div id="deck-list" class="deck-list-container">
+                        <!-- Loaded dynamically -->
+                        <div class="loading-placeholder">Loading decks...</div>
+                    </div>
+                </div>
+
+                <div class="content-card margin-top-lg">
+                    <h2>Create New Deck</h2>
+                    <form id="form-create-deck" class="deck-form">
+                        <div class="form-group">
+                            <label for="select-target">Target Language (to learn):</label>
+                            <select id="select-target" required>
+                                <option value="" disabled selected>Select target...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="select-native">Native Language (you know):</label>
+                            <select id="select-native" required>
+                                <option value="" disabled selected>Select native...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="select-difficulty">Difficulty Level:</label>
+                            <select id="select-difficulty">
+                                <option value="A1">A1 - Beginner</option>
+                                <option value="A2">A2 - Elementary</option>
+                                <option value="B1">B1 - Intermediate</option>
+                                <option value="B2">B2 - Upper Intermediate</option>
+                                <option value="C1">C1 - Advanced</option>
+                                <option value="C2">C2 - Mastery</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Learning Modes:</label>
+                            <div class="checkbox-group">
+                                <label><input type="checkbox" name="modes" value="listen" checked> Listen</label>
+                                <label><input type="checkbox" name="modes" value="speak" checked> Speak</label>
+                                <label><input type="checkbox" name="modes" value="read"> Read</label>
+                                <label><input type="checkbox" name="modes" value="write"> Write</label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="select-assume-known">Assume Known Level (Optional):</label>
+                            <select id="select-assume-known">
+                                <option value="">None (start from beginning)</option>
+                                <option value="A1">A1</option>
+                                <option value="A2">A2</option>
+                                <option value="B1">B1</option>
+                                <option value="B2">B2</option>
+                                <option value="C1">C1</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="primary-button full-width">
+                            Create & Start Learning
+                        </button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- 2. FLIP-CARD STUDY SCREEN -->
+            <section id="screen-study" class="screen">
+                <!-- Badges / Progress Stats -->
+                <div class="stats-row">
+                    <div id="badge-mode" class="mode-badge">LISTEN</div>
+                    <div class="stats-badges">
+                        <span class="badge satisfied" id="stat-known">Known: 0</span>
+                        <span class="badge mature" id="stat-mature">Mature: 0</span>
+                        <span class="badge waiting" id="stat-todo">To Do: 0</span>
+                    </div>
+                </div>
+
+                <!-- Active Flashcard -->
+                <div class="flashcard-container">
+                    <div id="flashcard" class="flashcard">
+                        <!-- Front of Card -->
+                        <div class="card-face card-front">
+                            <!-- Prompts based on Mode -->
+                            <div id="mode-prompt-listen" class="mode-prompt hidden">
+                                <span class="material-icons prompt-icon">hearing</span>
+                                <p>Listen to the audio and recall the sentence</p>
+                            </div>
+                            <div id="mode-prompt-speak" class="mode-prompt hidden">
+                                <span class="material-icons prompt-icon">record_voice_over</span>
+                                <p>Speak the sentence matching the translation:</p>
+                            </div>
+                            <div id="mode-prompt-write" class="mode-prompt hidden">
+                                <span class="material-icons prompt-icon">edit</span>
+                                <p>Write the sentence matching the translation:</p>
+                            </div>
+                            <div id="mode-prompt-read" class="mode-prompt hidden">
+                                <span class="material-icons prompt-icon">menu_book</span>
+                                <p>Read and understand the sentence:</p>
+                            </div>
+
+                            <!-- Card Center Content -->
+                            <div class="card-content">
+                                <div id="card-front-text" class="card-text">---</div>
+                            </div>
+
+                            <!-- Front Audio controls -->
+                            <div class="audio-controls-row">
+                                <button id="btn-front-play" class="audio-btn" title="Play Target">
+                                    <span class="material-icons">play_arrow</span> Play
+                                </button>
+                                <button id="btn-front-slow" class="audio-btn slow" title="Play Slow Target">
+                                    <span class="material-icons">slow_motion_video</span> Slow
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Back of Card -->
+                        <div class="card-face card-back">
+                            <div class="card-content">
+                                <!-- Target sentence -->
+                                <div id="card-back-sentence" class="card-text text-large">---</div>
+                                <!-- Phonetic transcription -->
+                                <div id="card-back-phonetic" class="card-phonetic font-mono">---</div>
+                                <hr class="card-separator">
+                                <!-- Native translation -->
+                                <div id="card-back-translation" class="card-text text-small">---</div>
+                            </div>
+
+                            <!-- Back Audio control bar -->
+                            <div class="audio-controls-row full-width justify-center">
+                                <button id="btn-back-play" class="audio-btn-sm" title="Play Target">
+                                    <span class="material-icons">play_arrow</span> Target
+                                </button>
+                                <button id="btn-back-slow" class="audio-btn-sm" title="Play Slow Target">
+                                    <span class="material-icons">slow_motion_video</span> Slow
+                                </button>
+                                <button id="btn-back-native" class="audio-btn-sm" title="Play Native">
+                                    <span class="material-icons">volume_up</span> Native
+                                </button>
+                            </div>
+
+                            <hr class="card-separator">
+
+                            <!-- Word Rating badgeless click grid -->
+                            <div class="ratings-container">
+                                <h3>Rate individual words:</h3>
+                                <div id="definition-display" class="definition-box">&nbsp;</div>
+                                <div id="word-badge-grid" class="word-badge-grid">
+                                    <!-- Populated dynamically -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navigation Controls -->
+                <div class="study-controls">
+                    <button id="btn-flip" class="primary-button h-12 text-lg">Flip Card</button>
+                    
+                    <div id="back-controls" class="back-controls hidden">
+                        <div class="action-row">
+                            <button id="btn-all-green" class="outline-button green-border">
+                                <span class="material-icons">done_all</span> All Success
+                            </button>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="check-report-error">
+                                <span class="slider"></span>
+                                <span class="label-text">Report Error</span>
+                            </label>
+                        </div>
+                        <button id="btn-next" class="primary-button fill-primary h-12 text-lg">Next Card</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Hidden audio element for speech -->
+    <audio id="audio-player"></audio>
+
+    <!-- Application Script -->
+    <script type="module" src="/app.js"></script>
+</body>
+</html>
