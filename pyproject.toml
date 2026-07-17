@@ -14,7 +14,6 @@ dependencies = [
     "httpx",
     "kagglehub",
     "litellm",
-    "nicegui",
     "numpy",
     "pydantic",
     "ruff",
@@ -26,3 +25,9 @@ exclude = [
     ".git",
     ".venv",
 ]
+
+[tool.mypy]
+exclude = [
+    "^notes/",
+]
+
