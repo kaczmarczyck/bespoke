@@ -261,6 +261,61 @@ class TestCard(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(shared_native_path.exists())
             self.assertEqual(card_index.size(student_unit), 0)
 
+    def test_card_index_preload(self) -> None:
+        import json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            target_lang = LANGUAGES["trad_chinese"]
+            native_lang = LANGUAGES["german"]
+            cards_dir = tmp_path / "cards"
+            cards_dir.mkdir()
+            pair_dir = cards_dir / "trad_chinese_german"
+            pair_dir.mkdir()
+
+            card_id = "test_preload_card"
+            card = Card(
+                id=card_id,
+                sentence="大學生是學生。",
+                native_sentence="University student.",
+                audio_filename="audio.ogg",
+                slow_audio_filename="slow.ogg",
+                native_audio_filename="native.ogg",
+                phonetic="...",
+                unit_tags=[UnitTag(occurance="學生", unit_id="學生")],
+                notes=[],
+            )
+            card.write_json(pair_dir)
+
+            index_path = cards_dir / "index_trad_chinese_german.json"
+            index_data = {"學生": [card_id]}
+            with open(index_path, "w", encoding="utf-8") as f:
+                json.dump(index_data, f)
+
+            import bespoke.card
+
+            original_cards_dir = bespoke.card.CARDS_DIR
+            bespoke.card.CARDS_DIR = cards_dir
+            try:
+                card_index = CardIndex.load(target_lang, native_lang)
+
+                import time
+
+                start_time = time.time()
+                card_found = False
+                while time.time() - start_time < 2.0:
+                    if card_id in card_index._cache:
+                        card_found = True
+                        break
+                    time.sleep(0.01)
+
+                self.assertTrue(
+                    card_found, "Card was not preloaded in background cache."
+                )
+                self.assertEqual(card_index._cache[card_id].sentence, "大學生是學生。")
+            finally:
+                bespoke.card.CARDS_DIR = original_cards_dir
+
 
 if __name__ == "__main__":
     unittest.main()

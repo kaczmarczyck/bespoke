@@ -25,6 +25,7 @@ from pathlib import Path
 import pydantic
 import random
 from typing import Self
+import threading
 
 from bespoke.languages import Language
 from bespoke import llm
@@ -273,6 +274,18 @@ class CardIndex:
             if obj._index:
                 use_def = " - " in next(iter(obj._index.keys()))
                 target_language.initialize(use_definition=use_def)
+
+                # Preload all cards present in the index in a background thread to prevent UI freezing
+                def preload_cards():
+                    card_ids = set()
+                    for unit_cards in obj._index.values():
+                        card_ids.update(unit_cards)
+                    for card_id in card_ids:
+                        card = Card.load(obj._card_directory, card_id)
+                        if card is not None:
+                            obj._cache[card_id] = card
+
+                threading.Thread(target=preload_cards, daemon=True).start()
         except Exception:
             print(f"Unable to open {obj._index_path}, creating empty CardIndex.")
         return obj
