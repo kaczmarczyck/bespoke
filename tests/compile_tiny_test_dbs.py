@@ -14,122 +14,122 @@
 
 """Compiles tiny mock German-English and Traditional Chinese-German SQLite databases for testing."""
 
-import sqlite3
+import csv
+import json
 from pathlib import Path
+import tempfile
+import package_db
 
 
 def compile_db(db_path: Path, target: str, native: str, data: dict):
-    print(f"Creating tiny test DB at {db_path}...")
+    print(f"Creating tiny test DB at {db_path} via package_db...")
 
     # Load real audio bytes if available
     ogg_path = Path(
         "cards/german_english/000038335182748ab8fb04473d2de1c5975cfdb435f0cd07dc5f11ccfa0bb498.ogg"
     )
-    audio_bytes = None
+    audio_bytes = b""
     if ogg_path.exists():
         with open(ogg_path, "rb") as f:
             audio_bytes = f.read()
-        print(f"Loaded {len(audio_bytes)} bytes of test audio.")
-    else:
-        print("Warning: test OGG file not found, audio BLOBs will be empty.")
 
-    # Initialize SQLite
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        cards_dir = tmp_path / "cards"
+        languages_dir = tmp_path / "languages"
 
-    # Disable WAL mode and set to DELETE journal mode first
-    cursor.execute("PRAGMA journal_mode=DELETE;")
+        cards_dir.mkdir()
+        languages_dir.mkdir()
 
-    # Create tables
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cards (
-            id TEXT PRIMARY KEY,
-            sentence TEXT NOT NULL,
-            native_sentence TEXT NOT NULL,
-            phonetic TEXT,
-            unit_tags TEXT,
-            notes TEXT,
-            audio BLOB,
-            slow_audio BLOB,
-            native_audio BLOB
-        );
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS unit_cards (
-            unit_id TEXT NOT NULL,
-            card_id TEXT NOT NULL,
-            PRIMARY KEY (unit_id, card_id)
-        );
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS translations (
-            unit_id TEXT PRIMARY KEY,
-            translation TEXT NOT NULL
-        );
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS vocabulary (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            definition TEXT,
-            difficulty TEXT NOT NULL
-        );
-    """)
+        target_lang_dir = languages_dir / target
+        target_lang_dir.mkdir()
 
-    # Clear existing data
-    cursor.execute("DELETE FROM cards;")
-    cursor.execute("DELETE FROM unit_cards;")
-    cursor.execute("DELETE FROM translations;")
-    cursor.execute("DELETE FROM vocabulary;")
+        # 1. Write index JSON file
+        index_file = cards_dir / f"index_{target}_{native}.json"
+        index_data = {}
+        for unit_id, card_id in data["unit_cards"].items():
+            if unit_id not in index_data:
+                index_data[unit_id] = []
+            index_data[unit_id].append(card_id)
 
-    # Insert translations
-    for unit_id, trans in data["translations"].items():
-        cursor.execute(
-            "INSERT OR REPLACE INTO translations VALUES (?, ?);", (unit_id, trans)
+        with open(index_file, "w", encoding="utf-8") as f:
+            json.dump(index_data, f)
+
+        # 2. Write translations CSV file
+        translations_file = cards_dir / f"translations_{target}_{native}.csv"
+        with open(translations_file, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["unit_id", "translation"])
+            writer.writeheader()
+            for unit_id, trans in data["translations"].items():
+                writer.writerow({"unit_id": unit_id, "translation": trans})
+
+        # 3. Write vocabulary CSV file
+        vocab_file = target_lang_dir / "vocabulary.csv"
+        with open(vocab_file, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=["id", "name", "definition", "difficulty"]
+            )
+            writer.writeheader()
+            for item in data["vocabulary"]:
+                writer.writerow(
+                    {
+                        "id": item["id"],
+                        "name": item["name"],
+                        "definition": item["definition"],
+                        "difficulty": item["difficulty"],
+                    }
+                )
+
+        # 4. Write card JSON files in folder
+        pair_dir = cards_dir / f"{target}_{native}"
+        pair_dir.mkdir()
+
+        for card in data["cards"]:
+            card_id = card["id"]
+            unit_tags = card["unit_tags"]
+            if isinstance(unit_tags, str):
+                unit_tags = json.loads(unit_tags)
+            notes = card["notes"]
+            if isinstance(notes, str):
+                notes = json.loads(notes)
+
+            audio_filename = f"{card_id}.ogg"
+            slow_audio_filename = f"{card_id}_slow.ogg"
+
+            with open(pair_dir / audio_filename, "wb") as f:
+                f.write(audio_bytes)
+            with open(pair_dir / slow_audio_filename, "wb") as f:
+                f.write(audio_bytes)
+
+            card_json = {
+                "id": card_id,
+                "sentence": card["sentence"],
+                "native_sentence": card["native_sentence"],
+                "phonetic": card.get("phonetic"),
+                "unit_tags": unit_tags,
+                "notes": notes,
+                "audio_filename": str(pair_dir / audio_filename),
+                "slow_audio_filename": str(pair_dir / slow_audio_filename),
+                "native_audio_filename": str(pair_dir / audio_filename),
+            }
+
+            with open(pair_dir / f"{card_id}.json", "w", encoding="utf-8") as f:
+                json.dump(card_json, f)
+
+        # 5. package the deck using package_db.py logic
+        if db_path.exists():
+            try:
+                db_path.unlink()
+            except Exception:
+                pass
+
+        package_db.package_language_pair(
+            target,
+            native,
+            db_path,
+            cards_dir=cards_dir,
+            languages_dir=languages_dir,
         )
-
-    # Insert unit_cards
-    for unit_id, card_id in data["unit_cards"].items():
-        cursor.execute(
-            "INSERT OR REPLACE INTO unit_cards VALUES (?, ?);", (unit_id, card_id)
-        )
-
-    # Insert vocabulary
-    for item in data["vocabulary"]:
-        cursor.execute(
-            "INSERT OR REPLACE INTO vocabulary VALUES (?, ?, ?, ?);",
-            (item["id"], item["name"], item["definition"], item["difficulty"]),
-        )
-
-    # Insert cards
-    for card in data["cards"]:
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO cards (id, sentence, native_sentence, phonetic, unit_tags, notes, audio, slow_audio, native_audio)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """,
-            (
-                card["id"],
-                card["sentence"],
-                card["native_sentence"],
-                card["phonetic"],
-                card["unit_tags"],
-                card["notes"],
-                audio_bytes,
-                audio_bytes,
-                audio_bytes,
-            ),
-        )
-
-    conn.commit()
-
-    # Shrink database file size to release deleted space
-    print("Vacuuming database...")
-    cursor.execute("VACUUM;")
-    conn.commit()
-
-    conn.close()
-    print(f"Tiny DB {db_path.name} compiled successfully!")
 
 
 def main():

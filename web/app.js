@@ -196,10 +196,110 @@ async function isLocalDbStored(target, native) {
     }
 }
 
-async function downloadAndStoreDb(target, native) {
+async function getAudioFilenamesFromDb(dbFilename, target, native) {
+    const sqlite = await getSqlite3();
+    let db;
+    if (poolUtil && poolUtil.OpfsSAHPoolDb) {
+        db = new poolUtil.OpfsSAHPoolDb(dbFilename);
+    } else {
+        try {
+            if (!('opfs' in sqlite)) {
+                throw new Error("OPFS not in sqliteInitModule");
+            }
+            db = new sqlite.oo1.OpfsDb(dbFilename);
+        } catch (e) {
+            console.warn("OPFS not available for metadata lookup, using in-memory:", e);
+            let bytes = window.downloadedDecks[dbFilename];
+            if (!bytes) {
+                const root = await navigator.storage.getDirectory();
+                const fileHandle = await root.getFileHandle(dbFilename);
+                const file = await fileHandle.getFile();
+                const buffer = await file.arrayBuffer();
+                bytes = new Uint8Array(buffer);
+            }
+            const pData = sqlite.wasm.alloc(bytes.byteLength);
+            sqlite.wasm.heap8u().set(bytes, pData);
+            db = new sqlite.oo1.DB();
+            const rc = sqlite.capi.sqlite3_deserialize(
+                db.pointer,
+                "main",
+                pData,
+                bytes.byteLength,
+                bytes.byteLength,
+                1 | 2
+            );
+            if (rc !== 0) throw new Error("deserialize failed");
+        }
+    }
+
+    const audioFiles = new Set();
+    try {
+        db.exec({
+            sql: "SELECT DISTINCT audio_filename, slow_audio_filename, native_audio_filename FROM cards;",
+            rowMode: 'array',
+            callback: (row) => {
+                if (row[0]) audioFiles.add(row[0]);
+                if (row[1]) audioFiles.add(row[1]);
+                if (row[2]) audioFiles.add(row[2]);
+            }
+        });
+    } catch (err) {
+        console.error("Error querying audio filenames from DB:", err);
+    } finally {
+        try {
+            db.close();
+        } catch (e) {}
+    }
+    return audioFiles;
+}
+
+async function downloadAudioFilesForDb(audioFiles, onProgress) {
+    const cache = await caches.open('bespoke-audio-cache');
+    const filesArray = Array.from(audioFiles);
+    const total = filesArray.length;
+    let loaded = 0;
+    
+    const limit = 10;
+    const chunks = [];
+    for (let i = 0; i < total; i += limit) {
+        chunks.push(filesArray.slice(i, i + limit));
+    }
+    
+    for (const chunk of chunks) {
+        await Promise.all(chunk.map(async (filename) => {
+            const url = filename.startsWith('/') ? filename : `/${filename}`;
+            const exists = await cache.match(url);
+            if (exists) {
+                loaded++;
+                if (onProgress) {
+                    onProgress({ stage: 'audio', loaded, total });
+                }
+                return;
+            }
+            try {
+                const res = await fetch(url);
+                if (res.ok) {
+                    await cache.put(url, res);
+                }
+            } catch (err) {
+                console.warn(`Failed to cache audio file ${url}:`, err);
+            }
+            loaded++;
+            if (onProgress) {
+                onProgress({ stage: 'audio', loaded, total });
+            }
+        }));
+    }
+}
+
+async function downloadAndStoreDb(target, native, onProgress) {
     const dbFilename = `deck_${target}_${native}.sqlite3`;
     const url = `/cards/${target}_${native}.db`;
     console.log(`Downloading deck database from ${url}...`);
+    
+    if (onProgress) {
+        onProgress({ stage: 'db', percent: null });
+    }
     
     const response = await fetch(url);
     if (!response.ok) {
@@ -214,10 +314,7 @@ async function downloadAndStoreDb(target, native) {
         const bytes = new Uint8Array(buffer);
         window.downloadedDecks[dbFilename] = bytes;
         console.log(`Saved database ${dbFilename} to browser memory for testing.`);
-        return;
-    }
-
-    if (poolUtil) {
+    } else if (poolUtil) {
         const reader = response.body.getReader();
         const callback = async () => {
             const { done, value } = await reader.read();
@@ -225,6 +322,7 @@ async function downloadAndStoreDb(target, native) {
             return value;
         };
         await poolUtil.importDb(dbFilename, callback);
+        console.log(`Saved database ${dbFilename} to browser OPFS storage.`);
     } else {
         if (typeof navigator.storage === 'undefined' || !navigator.storage.getDirectory) {
             throw new Error("OPFS navigator.storage is not available (non-secure context?).");
@@ -239,10 +337,21 @@ async function downloadAndStoreDb(target, native) {
             await writable.write(value);
         }
         await writable.close();
+        console.log(`Saved database ${dbFilename} to browser OPFS storage.`);
+    }
+
+    if (onProgress) {
+        onProgress({ stage: 'db_complete' });
     }
     
-    console.log(`Saved database ${dbFilename} to browser OPFS storage.`);
+    const audioFiles = await getAudioFilenamesFromDb(dbFilename, target, native);
+    console.log(`Found ${audioFiles.size} audio files to cache.`);
+    
+    if (audioFiles.size > 0) {
+        await downloadAudioFilesForDb(audioFiles, onProgress);
+    }
 }
+
 
 async function loadOfflineDeck(target, native, difficulty, modes, assumeKnown) {
     const dbFilename = `deck_${target}_${native}.sqlite3`;
@@ -393,7 +502,7 @@ async function loadOfflineDeck(target, native, difficulty, modes, assumeKnown) {
     // 3. Load card JSON metadata (kept in memory!)
     const cards = {};
     db.exec({
-        sql: "SELECT id, sentence, native_sentence, phonetic, unit_tags, notes FROM cards;",
+        sql: "SELECT id, sentence, native_sentence, phonetic, unit_tags, notes, audio_filename, slow_audio_filename, native_audio_filename FROM cards;",
         rowMode: 'object',
         callback: (row) => {
             const unitTags = JSON.parse(row.unit_tags) || [];
@@ -405,7 +514,10 @@ async function loadOfflineDeck(target, native, difficulty, modes, assumeKnown) {
                 native_sentence: row.native_sentence,
                 phonetic: row.phonetic,
                 unit_tags: unitTags,
-                notes: JSON.parse(row.notes)
+                notes: JSON.parse(row.notes),
+                audio_filename: row.audio_filename,
+                slow_audio_filename: row.slow_audio_filename,
+                native_audio_filename: row.native_audio_filename
             };
         }
     });
@@ -603,9 +715,18 @@ function renderCombinedDecks(apiDecks, storedDecks, serverAvailable) {
             downloadBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 downloadBtn.disabled = true;
-                downloadBtn.textContent = "Downloading...";
+                downloadBtn.textContent = "Downloading DB...";
                 try {
-                    await downloadAndStoreDb(deck.target_language, deck.native_language);
+                    await downloadAndStoreDb(deck.target_language, deck.native_language, (progress) => {
+                        if (progress.stage === 'db') {
+                            downloadBtn.textContent = "Downloading DB...";
+                        } else if (progress.stage === 'db_complete') {
+                            downloadBtn.textContent = "Extracting audio...";
+                        } else if (progress.stage === 'audio') {
+                            const percent = Math.round((progress.loaded / progress.total) * 100);
+                            downloadBtn.textContent = `Audio: ${progress.loaded}/${progress.total} (${percent}%)`;
+                        }
+                    });
                     alert("Download complete! This deck is now offline-ready.");
                     loadDecksAndLanguages();
                 } catch (err) {
@@ -986,7 +1107,16 @@ async function triggerAudioPlay(fieldName) {
             // Revoke URL after play ends to free browser memory leaks
             audioPlayer.onended = () => URL.revokeObjectURL(url);
         } else {
-            console.log(`Audio BLOB '${fieldName}' not found for card ID: ${currentCardState.card.id}`);
+            // Fallback: load directly from the server if online
+            const filename = currentCardState.card[`${fieldName}_filename`];
+            if (filename) {
+                // Prepend slash if needed
+                const srcUrl = filename.startsWith('/') ? filename : `/${filename}`;
+                audioPlayer.src = srcUrl;
+                audioPlayer.play().catch(e => console.log("Audio playback blocked:", e));
+            } else {
+                console.log(`Audio file path for '${fieldName}' not found for card ID: ${currentCardState.card.id}`);
+            }
         }
     } catch (e) {
         console.error("Error loading audio BLOB offline:", e);

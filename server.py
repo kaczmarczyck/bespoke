@@ -95,6 +95,19 @@ def get_available_languages():
     return available
 
 
+def is_safe_path(base_dir: Path, path: Path) -> bool:
+    base_abs = base_dir.resolve()
+    try:
+        path_abs = path.resolve()
+    except FileNotFoundError:
+        path_abs = Path(os.path.abspath(path))
+    try:
+        common = os.path.commonpath([str(base_abs), str(path_abs)])
+        return common == str(base_abs)
+    except ValueError:
+        return False
+
+
 class BespokeAPIHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Silence standard HTTP logs to keep console clean
@@ -103,12 +116,16 @@ class BespokeAPIHandler(BaseHTTPRequestHandler):
     def send_error_response(self, status_code, message):
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         self.end_headers()
         self.wfile.write(json.dumps({"error": message}).encode("utf-8"))
 
     def send_json_response(self, data):
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         self.end_headers()
         self.wfile.write(json.dumps(data).encode("utf-8"))
 
@@ -127,6 +144,8 @@ class BespokeAPIHandler(BaseHTTPRequestHandler):
         try:
             self.send_response(200)
             self.send_header("Content-Type", content_type)
+            self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+            self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
             self.send_header("Content-Length", str(file_path.stat().st_size))
             self.end_headers()
 
@@ -154,14 +173,25 @@ class BespokeAPIHandler(BaseHTTPRequestHandler):
         parts = Path(path.lstrip("/")).parts
         if not parts:
             file_to_serve = Path("web/index.html")
+            base_dir = Path("web")
         elif parts[0] == "cards":
             file_to_serve = Path(path.lstrip("/"))
+            base_dir = Path("cards")
         elif parts[0] == "languages":
             file_to_serve = Path(path.lstrip("/"))
+            base_dir = Path("languages")
         else:
             file_to_serve = Path("web") / Path(path.lstrip("/"))
-            if not file_to_serve.exists() or file_to_serve.is_dir():
-                file_to_serve = Path("web/index.html")
+            base_dir = Path("web")
+
+        if not is_safe_path(base_dir, file_to_serve):
+            self.send_error(403, "Access denied")
+            return
+
+        if base_dir == Path("web") and (
+            not file_to_serve.exists() or file_to_serve.is_dir()
+        ):
+            file_to_serve = Path("web/index.html")
 
         self.serve_static_file(file_to_serve)
 
@@ -171,7 +201,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 def run_server(port=8080):
-    server_address = ("", port)
+    server_address = ("127.0.0.1", port)
     httpd = ThreadedHTTPServer(server_address, BespokeAPIHandler)
     print(f"Bespoke backend static server running on http://localhost:{port}/")
     try:

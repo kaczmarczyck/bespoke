@@ -26,15 +26,27 @@ CARDS_DIR = Path("cards")
 LANGUAGES_DIR = Path("languages")
 
 
-def package_language_pair(target: str, native: str, output_db_path: Path):
+def package_language_pair(
+    target: str,
+    native: str,
+    output_db_path: Path,
+    cards_dir: Path | None = None,
+    languages_dir: Path | None = None,
+    exclude_audio: bool = False,
+):
+    if cards_dir is None:
+        cards_dir = CARDS_DIR
+    if languages_dir is None:
+        languages_dir = LANGUAGES_DIR
+
     print(f"Packaging {target}_{native} into {output_db_path}...")
 
     # Validate that files exist before starting SQLite
-    index_file = CARDS_DIR / f"index_{target}_{native}.json"
-    card_directory = CARDS_DIR / f"{target}_{native}"
+    index_file = cards_dir / f"index_{target}_{native}.json"
+    card_directory = cards_dir / f"{target}_{native}"
 
     if not index_file.exists():
-        available_dirs = [p.name for p in CARDS_DIR.glob("*_*") if p.is_dir()]
+        available_dirs = [p.name for p in cards_dir.glob("*_*") if p.is_dir()]
         raise FileNotFoundError(
             f"Card index file not found at: {index_file}.\n"
             f"Please verify that target/native parameters match folders in cards/.\n"
@@ -63,7 +75,10 @@ def package_language_pair(target: str, native: str, output_db_path: Path):
             notes TEXT,     -- JSON array of notes
             audio BLOB,
             slow_audio BLOB,
-            native_audio BLOB
+            native_audio BLOB,
+            audio_filename TEXT,
+            slow_audio_filename TEXT,
+            native_audio_filename TEXT
         );
     """)
 
@@ -94,7 +109,7 @@ def package_language_pair(target: str, native: str, output_db_path: Path):
     conn.commit()
 
     # 2. Insert Translations
-    translation_file = CARDS_DIR / f"translations_{target}_{native}.csv"
+    translation_file = cards_dir / f"translations_{target}_{native}.csv"
     if translation_file.exists():
         print("Processing translations CSV...")
         with open(translation_file, "r", encoding="utf-8") as f:
@@ -134,7 +149,7 @@ def package_language_pair(target: str, native: str, output_db_path: Path):
     print(f"Inserted {len(index_to_insert)} index mappings.")
 
     # 4. Insert Vocabulary (reconciling vocabulary.csv with index keys)
-    vocab_file = LANGUAGES_DIR / target / "vocabulary.csv"
+    vocab_file = languages_dir / target / "vocabulary.csv"
     if vocab_file.exists():
         print("Processing vocabulary list...")
         # Load CSV into memory for lookup by name
@@ -179,7 +194,7 @@ def package_language_pair(target: str, native: str, output_db_path: Path):
         print(f"Inserted {len(vocab_to_insert)} vocabulary units.")
 
     # 5. Insert Cards and Audio BLOBs
-    card_directory = CARDS_DIR / f"{target}_{native}"
+    card_directory = cards_dir / f"{target}_{native}"
     if card_directory.exists():
         json_files = list(card_directory.glob("*.json"))
         print(f"Processing {len(json_files)} card files...")
@@ -205,7 +220,7 @@ def package_language_pair(target: str, native: str, output_db_path: Path):
                     p = Path(filename)
                     if not p.exists():
                         p = (
-                            CARDS_DIR / p.relative_to("cards")
+                            cards_dir / p.relative_to("cards")
                             if p.parts[0] == "cards"
                             else card_directory / p.name
                         )
@@ -215,9 +230,13 @@ def package_language_pair(target: str, native: str, output_db_path: Path):
                             return af.read()
                     return None
 
-                audio = read_audio(card_data.get("audio_filename", ""))
-                slow_audio = read_audio(card_data.get("slow_audio_filename", ""))
-                native_audio = read_audio(card_data.get("native_audio_filename", ""))
+                audio_fn = card_data.get("audio_filename", "")
+                slow_audio_fn = card_data.get("slow_audio_filename", "")
+                native_audio_fn = card_data.get("native_audio_filename", "")
+
+                audio = None if exclude_audio else read_audio(audio_fn)
+                slow_audio = None if exclude_audio else read_audio(slow_audio_fn)
+                native_audio = None if exclude_audio else read_audio(native_audio_fn)
 
                 cards_batch.append(
                     (
@@ -230,6 +249,9 @@ def package_language_pair(target: str, native: str, output_db_path: Path):
                         audio,
                         slow_audio,
                         native_audio,
+                        audio_fn,
+                        slow_audio_fn,
+                        native_audio_fn,
                     )
                 )
 
@@ -237,8 +259,9 @@ def package_language_pair(target: str, native: str, output_db_path: Path):
                     cursor.executemany(
                         """
                         INSERT OR REPLACE INTO cards (
-                            id, sentence, native_sentence, phonetic, unit_tags, notes, audio, slow_audio, native_audio
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                            id, sentence, native_sentence, phonetic, unit_tags, notes, audio, slow_audio, native_audio,
+                            audio_filename, slow_audio_filename, native_audio_filename
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                     """,
                         cards_batch,
                     )
@@ -254,8 +277,9 @@ def package_language_pair(target: str, native: str, output_db_path: Path):
             cursor.executemany(
                 """
                 INSERT OR REPLACE INTO cards (
-                    id, sentence, native_sentence, phonetic, unit_tags, notes, audio, slow_audio, native_audio
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    id, sentence, native_sentence, phonetic, unit_tags, notes, audio, slow_audio, native_audio,
+                    audio_filename, slow_audio_filename, native_audio_filename
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
                 cards_batch,
             )
@@ -306,11 +330,19 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output", type=str, required=True, help="Output SQLite database file path"
     )
+    parser.add_argument(
+        "--exclude-audio",
+        action="store_true",
+        help="Exclude audio blobs from SQLite database (reduces size dramatically)",
+    )
     args = parser.parse_args()
 
     target_lang = target_choices[args.target]
     native_lang = native_choices[args.native]
 
     package_language_pair(
-        target_lang.code_name, native_lang.code_name, Path(args.output)
+        target_lang.code_name,
+        native_lang.code_name,
+        Path(args.output),
+        exclude_audio=args.exclude_audio,
     )

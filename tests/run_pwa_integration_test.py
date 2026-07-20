@@ -17,10 +17,12 @@
 import asyncio
 import json
 import os
+import shutil
 import signal
 import subprocess
 import time
 import urllib.request
+from pathlib import Path
 import websockets
 
 
@@ -35,17 +37,34 @@ async def test_pwa():
     time.sleep(1.5)  # Wait for server to start
 
     # 2. Start headless chrome
+    chrome_profile_dir = Path(__file__).parent / "chrome_profile_integration"
+    if chrome_profile_dir.exists():
+        try:
+            shutil.rmtree(chrome_profile_dir)
+        except Exception:
+            pass
+    chrome_profile_dir.mkdir(parents=True, exist_ok=True)
+
+    chrome_env = os.environ.copy()
+    chrome_env["DISPLAY"] = ""
+    chrome_env["WAYLAND_DISPLAY"] = ""
+    chrome_env["DBUS_SESSION_BUS_ADDRESS"] = ""
+
     chrome_process = subprocess.Popen(
         [
             "google-chrome",
-            "--headless=new",
+            "--headless",
             "--disable-gpu",
+            f"--user-data-dir={chrome_profile_dir}",
+            "--no-first-run",
+            "--no-default-browser-check",
             "--remote-debugging-port=9222",
             "http://localhost:8089/",
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         preexec_fn=os.setsid,
+        env=chrome_env,
     )
     time.sleep(2)  # Wait for chrome to initialize
 
