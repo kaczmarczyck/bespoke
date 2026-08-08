@@ -47,7 +47,7 @@ class TestPWASystematic(unittest.TestCase):
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
         server_process = subprocess.Popen(
-            ["uv", "run", "learn.py", "--port", "8089"],
+            ["uv", "run", "learn.py", "--port", "8089", "--no-browser"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             preexec_fn=os.setsid,

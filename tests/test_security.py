@@ -27,7 +27,7 @@ class TestServerSecurity(unittest.TestCase):
         cls.port = 8090
         # Start server
         cls.server_process = subprocess.Popen(
-            ["uv", "run", "learn.py", "--port", str(cls.port)],
+            ["uv", "run", "learn.py", "--port", str(cls.port), "--no-browser"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             preexec_fn=os.setsid,

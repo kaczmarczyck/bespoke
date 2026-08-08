@@ -31,14 +31,21 @@ def main():
     parser.add_argument(
         "--port", type=int, default=8080, help="Local server port to run on."
     )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open a browser window automatically.",
+    )
     args = parser.parse_args()
 
     port = int(os.environ.get("PORT", args.port))
 
-    def launch_browser():
-        webbrowser.open(f"http://localhost:{port}/")
+    if not args.no_browser and not os.environ.get("BESPOKE_NO_BROWSER"):
 
-    threading.Timer(0.5, launch_browser).start()
+        def launch_browser():
+            webbrowser.open(f"http://localhost:{port}/")
+
+        threading.Timer(0.5, launch_browser).start()
 
     server.run_server(port)
 

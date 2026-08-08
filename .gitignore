@@ -1,3 +1,4 @@
 __pycache__/
 deck*.json
 cards/
+tests/chrome_profile*/
