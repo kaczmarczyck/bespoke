@@ -77,7 +77,7 @@ name,definition,difficulty
 今,,A1
 続く,,A1
 国,,A1
-未だ,,A1
+まだ,,A1
 やる,,A1
 言う,,A1
 少ない,,A1
@@ -376,7 +376,6 @@ name,definition,difficulty
 二日,,A1
 四つ,,A1
 暖かい,,A1
-有る,,A1
 良い,,A1
 五つ,,A1
 妹,,A1
@@ -1049,6 +1048,15 @@ name,definition,difficulty
 について,,A2
 もうすぐ,,A2
 けれども,,A2
+ばかり,,A2
+ずつ,,A2
+けど,,A2
+けれど,,A2
+ので,,A2
+のに,,A2
+ながら,,A2
+かい,,A2
+だい,,A2
 すぎる,,A2
 かもしれない,,A2
 がる,,A2
@@ -1635,7 +1643,6 @@ name,definition,difficulty
 訳,,A2
 リボン,,A2
 いかが,,A2
-居る,,A2
 交通費,,A2
 ステレオ,,A2
 滑る,,A2
@@ -2036,6 +2043,8 @@ name,definition,difficulty
 不動産屋,,A2
 郵便屋さん,,A2
 可,,A2
+さえ,,B1
+こそ,,B1
 的,,B1
 業界,,B1
 整備,,B1
@@ -3023,6 +3032,7 @@ name,definition,difficulty
 出かける,,B1
 数日,,B1
 わ,,B2
+すら,,B2
 イスラム教,,B2
 引用,,B2
 ウサギ,,B2
