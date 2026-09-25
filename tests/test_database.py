@@ -514,6 +514,97 @@ class TestDatabaseConvert(unittest.IsolatedAsyncioTestCase):
             index = database.load_index_from_db(expected_path)
             self.assertEqual(index["大学生"], ["card_001"])
 
+    @mock.patch(
+        "maintainers.convert_dataset.encode_audio_to_ogg",
+        return_value=b"OggS_NATIVE_CONVERTED_AUDIO",
+    )
+    async def test_convert_dataset_resumption(
+        self, _mock_encode: mock.AsyncMock
+    ) -> None:
+        target = LANGUAGES["japanese"]
+        orig_native = LANGUAGES["english"]
+        new_native = LANGUAGES["german"]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            source_db = self._create_source_db(tmp_path, target, orig_native)
+
+            call_counts: dict[str, int] = {"translate": 0, "speak": 0}
+
+            class CountingFakeLlmClient(ConvertFakeLlmClient):
+                async def translate(self, sentence: str, language: Language) -> str:
+                    call_counts["translate"] += 1
+                    return await super().translate(sentence, language)
+
+                async def speak(
+                    self, sentence: str, *, slowly: bool = False
+                ) -> np.ndarray:
+                    call_counts["speak"] += 1
+                    return await super().speak(sentence, slowly=slowly)
+
+            fake_llm = CountingFakeLlmClient(
+                {
+                    "大学生は学生より年上です。": "Ein Universitätsstudent ist älter als ein Student.",
+                    "大学生": "Universitätsstudent",
+                    "学生": "Student",
+                }
+            )
+
+            # First conversion run
+            result_path = await convert_dataset(
+                input_db_path=source_db,
+                to_native=new_native,
+                output_db_path=None,
+                llm_client=fake_llm,
+            )
+            self.assertEqual(call_counts["translate"], 1)
+            self.assertEqual(call_counts["speak"], 1)
+
+            # Second conversion run on existing database should skip already converted card
+            await convert_dataset(
+                input_db_path=source_db,
+                to_native=new_native,
+                output_db_path=result_path,
+                llm_client=fake_llm,
+            )
+            # Counts must remain 1 because card was already converted
+            self.assertEqual(call_counts["translate"], 1)
+            self.assertEqual(call_counts["speak"], 1)
+            self.assertTrue(database.verify_dataset_db(result_path))
+
+    @mock.patch(
+        "maintainers.convert_dataset.encode_audio_to_ogg",
+        return_value=b"OggS_NATIVE_CONVERTED_AUDIO",
+    )
+    async def test_convert_dataset_handles_failed_card(
+        self, _mock_encode: mock.AsyncMock
+    ) -> None:
+        target = LANGUAGES["japanese"]
+        orig_native = LANGUAGES["english"]
+        new_native = LANGUAGES["german"]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            source_db = self._create_source_db(tmp_path, target, orig_native)
+
+            class FailingCardLlmClient(ConvertFakeLlmClient):
+                async def translate(self, sentence: str, language: Language) -> str:
+                    raise ValueError("Missing content")
+
+            fake_llm = FailingCardLlmClient()
+
+            result_path = await convert_dataset(
+                input_db_path=source_db,
+                to_native=new_native,
+                output_db_path=None,
+                llm_client=fake_llm,
+            )
+            # The failed card is skipped without crashing
+            self.assertTrue(result_path.exists())
+            self.assertTrue(database.verify_dataset_db(result_path))
+            cards = database.load_all_cards_from_db(result_path)
+            self.assertEqual(len(cards), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
